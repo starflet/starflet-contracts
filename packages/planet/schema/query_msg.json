@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryMsg",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "config"
+      ],
+      "properties": {
+        "config": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "staker_info"
+      ],
+      "properties": {
+        "staker_info": {
+          "type": "object",
+          "required": [
+            "staker_addr"
+          ],
+          "properties": {
+            "staker_addr": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "commission"
+      ],
+      "properties": {
+        "commission": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "rate"
+      ],
+      "properties": {
+        "rate": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}
