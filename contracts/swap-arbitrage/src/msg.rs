@@ -10,7 +10,7 @@ pub struct InstantiateMsg {
     pub asset_info: AssetInfo,
     pub symbol: String,
     pub token_code_id: u64,
-    pub terraswap_router: String,
+    pub pair_contract: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -21,20 +21,20 @@ pub enum ExecuteMsg {
         owner: Option<String>,
         commission_rate: Option<Decimal256>,
         code_id: Option<u64>,
-        terraswap_router: Option<String>,
+        pair_contract: Option<String>,
     },
     Bond {
         asset: Asset,
     },
     Swap {
-        route_path: RoutePath,
+        path: Path,
     },
     Claim {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RoutePath {
+pub enum Path {
     NativeSwapToTerraSwap,
     TerraSwapToNativeSwap,
 }
@@ -46,5 +46,10 @@ pub struct ConfigResponse {
     pub asset_info: AssetInfo,
     pub token_code_id: u64,
     pub token_address: String,
-    pub terraswap_router: String,
+    pub pair_contract: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MigrateMsg {
+    pub pair_contract: String,
 }

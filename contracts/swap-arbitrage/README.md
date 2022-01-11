@@ -25,8 +25,8 @@
         }
     },
     "symbol": "SWAP",
-    "token_code_id": 148 // cw20
-    "terraswap_router": "terra14z80rwpd0alzj4xdtgqdmcqt9wd9xj5ffd60wp" // terraswap router contract
+    "token_code_id": 148, // cw20
+    "pair_contract": "terra156v8s539wtz0sjpn8y8a8lfg8fhmwa7fy22aff" // terraswap luna <> UST pair
 }
 ```
 

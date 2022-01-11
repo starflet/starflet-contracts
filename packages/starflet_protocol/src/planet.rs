@@ -1,5 +1,5 @@
 use cosmwasm_bignumber::Decimal256;
-use cosmwasm_std::CosmosMsg;
+use cosmwasm_std::Binary;
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,7 @@ pub enum ExecuteMsg {
         asset: Asset,
     },
     Execute {
-        msg: CosmosMsg,
+        msg: Binary,
         is_distribute: bool,
     },
     Claim {},

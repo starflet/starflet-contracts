@@ -1,8 +1,9 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    attr, from_binary, to_binary, Addr, Attribute, Binary, CanonicalAddr, CosmosMsg, Deps, DepsMut,
-    Env, MessageInfo, Reply, ReplyOn, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg,
+    attr, from_binary, to_binary, Addr, Attribute, BankMsg, Binary, CanonicalAddr, CosmosMsg, Deps,
+    DepsMut, Env, MessageInfo, Reply, ReplyOn, Response, StdError, StdResult, SubMsg, Uint128,
+    WasmMsg,
 };
 use moneymarket::querier::query_supply;
 use starflet_protocol::planet::{
@@ -10,6 +11,7 @@ use starflet_protocol::planet::{
     MigrateMsg, QueryMsg, RateResponse, StakerInfoResponse,
 };
 use std::ops::{Div, Mul, Sub};
+use terra_cosmwasm::TerraMsgWrapper;
 use terraswap::asset::{Asset, AssetInfo};
 use terraswap::querier::query_token_balance;
 
@@ -27,9 +29,10 @@ use terraswap::token::InstantiateMsg as TokenInstantiateMsg;
 
 use std::convert::From;
 
-const MSG_REPLY_ID_TOKEN_INSTANT: u64 = 1;
-const MSG_REPLY_ID_EXECUTE: u64 = 2;
-const MSG_REPLY_ID_EXECUTE_SKIP: u64 = 3;
+pub const MSG_REPLY_ID_TOKEN_INSTANT: u64 = 1;
+pub const MSG_REPLY_ID_EXECUTE: u64 = 2;
+pub const MSG_REPLY_ID_EXECUTE_SKIP: u64 = 3;
+pub const MSG_REPLY_ID_MUST_EXECUTE: u64 = 4;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -81,7 +84,7 @@ pub fn execute(
     env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
-) -> Result<Response, ContractError> {
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     match msg {
         ExecuteMsg::Receive(msg) => receive_cw20(deps, env, info, msg),
         ExecuteMsg::UpdateConfig {
@@ -103,7 +106,7 @@ pub fn try_update_config(
     owner: Option<String>,
     commission_rate: Option<Decimal256>,
     code_id: Option<u64>,
-) -> Result<Response, ContractError> {
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let mut config: Config = get_config(deps.as_ref()).unwrap();
     let mut res: Vec<Attribute> = vec![Attribute::new("action", Action::UpdateConfig.to_string())];
 
@@ -153,7 +156,11 @@ pub fn compute_share_rate(deps: Deps, vaults_contract: Addr) -> StdResult<Decima
     Ok(revenue.div(Decimal256::from_uint256(vaults_total_supply)))
 }
 
-pub fn try_bond(deps: DepsMut, info: MessageInfo, asset: Asset) -> Result<Response, ContractError> {
+pub fn try_bond(
+    deps: DepsMut,
+    info: MessageInfo,
+    asset: Asset,
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     asset.assert_sent_native_token_balance(&info).unwrap();
 
     let config = get_config(deps.as_ref()).unwrap();
@@ -185,7 +192,7 @@ pub fn try_unbond(
     asset_info: AssetInfo,
     sender: Addr,
     amount: Uint128,
-) -> Result<Response, ContractError> {
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let share_rate = compute_share_rate(deps.as_ref(), vaults_contract.clone()).unwrap();
     let unbond_amount = Uint256::from(amount) * share_rate;
 
@@ -198,10 +205,10 @@ pub fn try_unbond(
 
     Ok(Response::new()
         .add_messages(vec![
-            unbond_asset
-                .clone()
-                .into_msg(&deps.querier, sender.clone())
-                .unwrap(),
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address: sender.to_string(),
+                amount: vec![unbond_asset.deduct_tax(&deps.querier)?],
+            }),
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: vaults_contract.to_string(),
                 funds: vec![],
@@ -217,9 +224,9 @@ pub fn try_unbond(
 pub fn try_execute(
     deps: Deps,
     info: MessageInfo,
-    msg: CosmosMsg,
+    msg: Binary,
     is_distribute: bool,
-) -> Result<Response, ContractError> {
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let config = get_config(deps).unwrap();
     if config.owner != info.sender {
         return Err(ContractError::Unauthorized {});
@@ -232,12 +239,15 @@ pub fn try_execute(
             MSG_REPLY_ID_EXECUTE_SKIP
         },
         gas_limit: None,
-        msg,
+        msg: from_binary(&msg).unwrap(),
         reply_on: ReplyOn::Success,
     }))
 }
 
-pub fn try_claim(mut deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+pub fn try_claim(
+    mut deps: DepsMut,
+    info: MessageInfo,
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let config = get_config(deps.as_ref()).unwrap();
     if config.owner != info.sender {
         return Err(ContractError::Unauthorized {});
@@ -254,12 +264,10 @@ pub fn try_claim(mut deps: DepsMut, info: MessageInfo) -> Result<Response, Contr
     sub_all_commission(deps.branch()).unwrap();
 
     Ok(Response::new()
-        .add_message(
-            asset
-                .clone()
-                .into_msg(&deps.querier, info.sender.clone())
-                .unwrap(),
-        )
+        .add_message(CosmosMsg::Bank(BankMsg::Send {
+            to_address: info.sender.to_string(),
+            amount: vec![asset.deduct_tax(&deps.querier)?],
+        }))
         .add_attribute("action", Action::Claim.to_string())
         .add_attribute("claimer", info.sender)
         .add_attribute("asset", asset.to_string()))
@@ -267,7 +275,11 @@ pub fn try_claim(mut deps: DepsMut, info: MessageInfo) -> Result<Response, Contr
 
 /// This just stores the result for future query
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn reply(mut deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractError> {
+pub fn reply(
+    mut deps: DepsMut,
+    env: Env,
+    msg: Reply,
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     match msg.id {
         MSG_REPLY_ID_TOKEN_INSTANT => {
             // get new token's contract address
@@ -289,7 +301,7 @@ pub fn reply(mut deps: DepsMut, env: Env, msg: Reply) -> Result<Response, Contra
                 .add_attribute("reply", "token_instant")
                 .add_attribute("token_address", res.get_contract_address()))
         }
-        MSG_REPLY_ID_EXECUTE => {
+        MSG_REPLY_ID_EXECUTE | MSG_REPLY_ID_MUST_EXECUTE => {
             let mut attrs: Vec<Attribute> = vec![attr("reply", "execute")];
 
             let post_vaults = get_vaults(deps.as_ref()).unwrap();
@@ -321,12 +333,17 @@ pub fn reply(mut deps: DepsMut, env: Env, msg: Reply) -> Result<Response, Contra
                 attrs.push(Attribute::new("result", "success"));
                 attrs.push(Attribute::new("revenue", revenue.to_string()));
                 attrs.push(Attribute::new("add_commission", commission.to_string()));
-            } else {
+            } else if msg.id == MSG_REPLY_ID_MUST_EXECUTE {
                 let loss = post_vaults - balance;
                 sub_commission(deps.branch(), loss).unwrap();
 
                 attrs.push(Attribute::new("result", "fail"));
                 attrs.push(Attribute::new("loss", loss.to_string()));
+            } else {
+                return Err(ContractError::FailedExecute(
+                    post_vaults.to_string(),
+                    balance.to_string(),
+                ));
             }
 
             set_vaults(deps.branch(), balance).unwrap();
@@ -343,7 +360,7 @@ pub fn receive_cw20(
     _env: Env,
     info: MessageInfo,
     cw20_msg: Cw20ReceiveMsg,
-) -> Result<Response, ContractError> {
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let contract_addr = info.sender;
     match from_binary(&cw20_msg.msg) {
         Ok(Cw20HookMsg::Unbond {}) => {
@@ -535,7 +552,7 @@ mod config {
         };
         let msg = InstantiateMsg {
             commission_rate: Decimal256::from_str(COMMISSION_RATE).unwrap(),
-            asset_info: asset_info.clone(),
+            asset_info,
             token_code_id: CODE_ID,
             symbol: SYMBOL.to_string(),
         };
@@ -672,7 +689,7 @@ mod reply {
         };
         let msg = InstantiateMsg {
             commission_rate: Decimal256::from_str(COMMISSION_RATE).unwrap(),
-            asset_info: asset_info.clone(),
+            asset_info,
             token_code_id: CODE_ID,
             symbol: SYMBOL.to_string(),
         };
@@ -803,7 +820,7 @@ mod reply {
 
         let res = MsgExecuteContractResponse::new();
         let reply_msg = Reply {
-            id: MSG_REPLY_ID_EXECUTE,
+            id: MSG_REPLY_ID_MUST_EXECUTE,
             result: ContractResult::Ok(SubMsgExecutionResponse {
                 events: vec![],
                 data: Some(res.write_to_bytes().unwrap().into()),
@@ -906,7 +923,7 @@ mod bond {
         };
         let msg = InstantiateMsg {
             commission_rate: Decimal256::from_str(COMMISSION_RATE).unwrap(),
-            asset_info: asset_info.clone(),
+            asset_info,
             token_code_id: CODE_ID,
             symbol: SYMBOL.to_string(),
         };
@@ -999,9 +1016,7 @@ mod bond {
             },
         };
 
-        let bond_msg = ExecuteMsg::Bond {
-            asset: bond_asset.clone(),
-        };
+        let bond_msg = ExecuteMsg::Bond { asset: bond_asset };
 
         let info = mock_info(BONDER1, &coins(99, "uusd"));
 
@@ -1035,7 +1050,7 @@ mod unbond {
         };
         let msg = InstantiateMsg {
             commission_rate: Decimal256::from_str(COMMISSION_RATE).unwrap(),
-            asset_info: asset_info.clone(),
+            asset_info,
             token_code_id: CODE_ID,
             symbol: SYMBOL.to_string(),
         };
@@ -1064,9 +1079,7 @@ mod unbond {
             },
         };
 
-        let bond_msg = ExecuteMsg::Bond {
-            asset: bond_asset.clone(),
-        };
+        let bond_msg = ExecuteMsg::Bond { asset: bond_asset };
 
         let info = mock_info(BONDER1, &coins(100, "uusd"));
 
@@ -1136,7 +1149,7 @@ mod claim {
         };
         let msg = InstantiateMsg {
             commission_rate: Decimal256::from_str(COMMISSION_RATE).unwrap(),
-            asset_info: asset_info.clone(),
+            asset_info,
             token_code_id: CODE_ID,
             symbol: SYMBOL.to_string(),
         };
@@ -1225,7 +1238,7 @@ mod rate {
         };
         let msg = InstantiateMsg {
             commission_rate: Decimal256::from_str(COMMISSION_RATE).unwrap(),
-            asset_info: asset_info.clone(),
+            asset_info,
             token_code_id: CODE_ID,
             symbol: SYMBOL.to_string(),
         };

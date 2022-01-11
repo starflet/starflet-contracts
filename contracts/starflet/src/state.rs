@@ -150,7 +150,7 @@ mod planet {
             description: CHANGE_DESCRIPTION.to_string(),
         };
 
-        store_planet(deps.as_mut(), planet_info2.clone()).unwrap();
+        store_planet(deps.as_mut(), planet_info2).unwrap();
 
         let res = load_planets(deps.as_ref(), None, None).unwrap();
         assert_eq!(
@@ -173,7 +173,7 @@ mod planet {
             description: DESCRIPTION.to_string(),
         };
 
-        store_planet(deps.as_mut(), planet_info1.clone()).unwrap_err();
+        store_planet(deps.as_mut(), planet_info1).unwrap_err();
     }
 
     #[test]
@@ -186,7 +186,7 @@ mod planet {
             description: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
         };
 
-        store_planet(deps.as_mut(), planet_info1.clone()).unwrap_err();
+        store_planet(deps.as_mut(), planet_info1).unwrap_err();
     }
 
     fn init(mut deps: DepsMut) {
