@@ -11,8 +11,8 @@
 #### testnet
 |title|content|
 |--|--|
-|code id|11079|
-|contract|terra1kv3uuf3kddfqqqjhzk7xze7qeu52lep4mcsuc2|
+|code id|33342|
+|contract|terra1l90p7fpyqpjp234nas5jzkfnn74f74qyu0gdvk|
 
 ## Command
 ### InstantiateMsg
@@ -24,7 +24,7 @@
 ```
 {
     "add_planet": {
-        "contract_addr": "terra1ndvfjs47eax9yxkc5tge2awlahswry3tg76zvj",
+        "contract_addr": "terra1a3cf7kj0leg9lsk29l2ghh6m6e8n8juy85fp2a",
         "title": "swap arbitrage",
         "description": "Run arbitrage using LUNA<>UST market between native swap and terraswap."
     }
@@ -35,7 +35,7 @@
 ```
 {
     "edit_planet": {
-        "contract_addr": "terra1ndvfjs47eax9yxkc5tge2awlahswry3tg76zvj",
+        "contract_addr": "terra1a3cf7kj0leg9lsk29l2ghh6m6e8n8juy85fp2a",
         "description": "Run arbitrage using LUNA<>UST market between native swap and terraswap"
     }
 }
@@ -45,7 +45,7 @@
 ```
 {
     "remove_planet": {
-        "contract_addr": "terra1ndvfjs47eax9yxkc5tge2awlahswry3tg76zvj"
+        "contract_addr": "terra1a3cf7kj0leg9lsk29l2ghh6m6e8n8juy85fp2a"
     }
 }
 ```
@@ -63,7 +63,7 @@
 ```
 {
     "planets": {
-        "start_after": "terra1ndvfjs47eax9yxkc5tge2awlahswry3tg76zvj",
+        "start_after": "terra1a3cf7kj0leg9lsk29l2ghh6m6e8n8juy85fp2a",
         "limit": 1
     }
 }
