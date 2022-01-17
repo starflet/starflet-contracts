@@ -5,7 +5,6 @@ use cosmwasm_std::{
     Response, StdResult, SubMsg, WasmMsg,
 };
 use cw2::set_contract_version;
-use cw20::Cw20ReceiveMsg;
 use terra_cosmwasm::{create_swap_msg, TerraMsgWrapper};
 
 use crate::{
@@ -80,15 +79,6 @@ pub fn execute(
         ExecuteMsg::Swap { path } => try_swap(deps.as_ref(), env, info, path),
         ExecuteMsg::Claim {} => try_claim(deps, info),
     }
-}
-
-pub fn try_receive_cw20(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    cw20_msg: Cw20ReceiveMsg,
-) -> Result<Response<TerraMsgWrapper>, PlanetContractError> {
-    receive_cw20(deps, env, info, cw20_msg)
 }
 
 pub fn try_update_config(
