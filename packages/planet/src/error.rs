@@ -17,4 +17,10 @@ pub enum ContractError {
 
     #[error("Already instantiate contract {0}")]
     AlreadyInstantiate(String),
+
+    #[error("Fail to parse {0} response")]
+    FailedToParse(String),
+
+    #[error("Fail to execute. before {0} after {1}")]
+    FailedExecute(String, String),
 }

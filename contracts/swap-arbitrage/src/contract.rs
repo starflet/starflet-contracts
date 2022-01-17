@@ -1,15 +1,16 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::Reply;
 use cosmwasm_std::{
-    to_binary, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    Uint128, WasmMsg,
+    to_binary, Attribute, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Reply, ReplyOn,
+    Response, StdResult, SubMsg, WasmMsg,
 };
 use cw2::set_contract_version;
+use cw20::Cw20ReceiveMsg;
+use terra_cosmwasm::{create_swap_msg, TerraMsgWrapper};
 
 use crate::{
-    msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, RoutePath},
-    state::{get_router, set_router},
+    msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, Path},
+    state::{get_contracts, set_contracts, Contracts},
 };
 use starflet_protocol::planet::{
     ConfigResponse as PlanetConfigResponse, InstantiateMsg as PlanetInstantiateMsg,
@@ -21,14 +22,14 @@ use planet::{
     contract::{
         instantiate as planet_instantiate, migrate as planet_migrate, query as planet_query,
         query_config as query_planet_config, receive_cw20, reply as planet_reply, try_bond,
-        try_claim, try_execute, try_update_config as try_planet_update_config,
+        try_claim, try_update_config as try_planet_update_config,
     },
     error::ContractError as PlanetContractError,
     state::{get_config, Config},
 };
 use terraswap::{
     asset::{Asset, AssetInfo},
-    router::{ExecuteMsg as TerraswapRouterExecute, SwapOperation},
+    pair::ExecuteMsg as PairExecuteMsg,
 };
 
 // version info for migration info
@@ -44,8 +45,11 @@ pub fn instantiate(
 ) -> Result<Response, PlanetContractError> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    let router_contract = deps.api.addr_validate(&msg.terraswap_router).unwrap();
-    set_router(deps.branch(), router_contract).unwrap();
+    let contracts = Contracts {
+        pair: deps.api.addr_validate(&msg.pair_contract).unwrap(),
+    };
+
+    set_contracts(deps.branch(), contracts).unwrap();
 
     let planet_msg = PlanetInstantiateMsg {
         commission_rate: msg.commission_rate,
@@ -63,58 +67,70 @@ pub fn execute(
     env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
-) -> Result<Response, PlanetContractError> {
+) -> Result<Response<TerraMsgWrapper>, PlanetContractError> {
     match msg {
         ExecuteMsg::Receive(msg) => receive_cw20(deps, env, info, msg),
         ExecuteMsg::UpdateConfig {
             owner,
             commission_rate,
             code_id,
-            terraswap_router,
-        } => try_update_config(
-            deps,
-            info,
-            owner,
-            commission_rate,
-            code_id,
-            terraswap_router,
-        ),
+            pair_contract,
+        } => try_update_config(deps, info, owner, commission_rate, code_id, pair_contract),
         ExecuteMsg::Bond { asset } => try_bond(deps, info, asset),
-        ExecuteMsg::Swap { route_path } => try_swap(deps.as_ref(), env, info, route_path),
+        ExecuteMsg::Swap { path } => try_swap(deps.as_ref(), env, info, path),
         ExecuteMsg::Claim {} => try_claim(deps, info),
     }
 }
 
+pub fn try_receive_cw20(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    cw20_msg: Cw20ReceiveMsg,
+) -> Result<Response<TerraMsgWrapper>, PlanetContractError> {
+    receive_cw20(deps, env, info, cw20_msg)
+}
+
 pub fn try_update_config(
-    mut deps: DepsMut,
+    deps: DepsMut,
     info: MessageInfo,
     owner: Option<String>,
     commission_rate: Option<Decimal256>,
     code_id: Option<u64>,
-    terraswap_router: Option<String>,
-) -> Result<Response, PlanetContractError> {
+    pair_contract: Option<String>,
+) -> Result<Response<TerraMsgWrapper>, PlanetContractError> {
     let config: Config = get_config(deps.as_ref()).unwrap();
+    let mut attrs: Vec<Attribute> = vec![];
 
     // permission check
     if info.sender != config.owner {
         return Err(PlanetContractError::Unauthorized {});
     }
 
-    if let Some(terraswap_router) = terraswap_router {
-        let router_contract = deps.api.addr_validate(&terraswap_router).unwrap();
-        set_router(deps.branch(), router_contract).unwrap();
+    let mut contracts = get_contracts(deps.as_ref()).unwrap();
+
+    if let Some(pair_contract) = pair_contract {
+        let pair = deps.api.addr_validate(&pair_contract).unwrap();
+        contracts.pair = pair.clone();
+        attrs.push(Attribute::new("pair_contract", pair.to_string()));
     }
 
-    try_planet_update_config(deps, info, owner, commission_rate, code_id)
+    match try_planet_update_config(deps, info, owner, commission_rate, code_id) {
+        Ok(res) => Ok(res.add_attributes(attrs)),
+        Err(e) => Err(e),
+    }
 }
+
+const MSG_REPLY_NATIVE_SWAP_TO_TERRA_SWAP: u64 = 11;
+const MSG_REPLY_TERRA_SWAP_TO_NATIVE_SWAP: u64 = 12;
 
 pub fn try_swap(
     deps: Deps,
     env: Env,
-    info: MessageInfo,
-    route_path: RoutePath,
-) -> Result<Response, PlanetContractError> {
-    let router_contract = get_router(deps).unwrap();
+    _info: MessageInfo,
+    path: Path,
+) -> Result<Response<TerraMsgWrapper>, PlanetContractError> {
+    let contracts = get_contracts(deps).unwrap();
 
     let config: Config = get_config(deps).unwrap();
     let asset_info: AssetInfo = config.asset_info;
@@ -125,67 +141,49 @@ pub fn try_swap(
 
     let mut funds: Vec<Coin> = vec![];
 
-    if asset_info.is_native_token() {
-        let asset = Asset {
-            info: asset_info.clone(),
-            amount: balance,
-        };
-
-        let coin = asset.deduct_tax(&deps.querier);
-
-        if let Ok(coin) = coin {
-            funds.push(coin)
-        }
-    }
-
-    let execute_msg = generate_route_msg(route_path, asset_info, balance);
-
-    let msg: CosmosMsg = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: router_contract.to_string(),
-        funds,
-        msg: to_binary(&execute_msg).unwrap(),
-    });
-
-    try_execute(deps, info, msg, true)
-}
-
-fn generate_route_msg(
-    route_path: RoutePath,
-    asset_info: AssetInfo,
-    minimum_receive: Uint128,
-) -> TerraswapRouterExecute {
-    let operations: Vec<SwapOperation> = match route_path {
-        RoutePath::NativeSwapToTerraSwap => vec![
-            SwapOperation::NativeSwap {
-                offer_denom: asset_info.to_string(),
-                ask_denom: "uluna".to_string(),
-            },
-            SwapOperation::TerraSwap {
-                offer_asset_info: AssetInfo::NativeToken {
-                    denom: "uluna".to_string(),
-                },
-                ask_asset_info: asset_info,
-            },
-        ],
-        RoutePath::TerraSwapToNativeSwap => vec![
-            SwapOperation::TerraSwap {
-                offer_asset_info: asset_info.clone(),
-                ask_asset_info: AssetInfo::NativeToken {
-                    denom: "uluna".to_string(),
-                },
-            },
-            SwapOperation::NativeSwap {
-                offer_denom: "uluna".to_string(),
-                ask_denom: asset_info.to_string(),
-            },
-        ],
+    let asset = Asset {
+        info: asset_info.clone(),
+        amount: balance,
     };
 
-    TerraswapRouterExecute::ExecuteSwapOperations {
-        operations,
-        minimum_receive: Some(minimum_receive),
-        to: None,
-    }
+    let coin = match path {
+        Path::TerraSwapToNativeSwap => asset.deduct_tax(&deps.querier).unwrap(),
+        Path::NativeSwapToTerraSwap => Coin {
+            denom: format!("{}", asset_info),
+            amount: asset.amount,
+        },
+    };
+    funds.push(coin.clone());
+
+    let (msg, sub_msg_id) = match path {
+        Path::NativeSwapToTerraSwap => (
+            create_swap_msg(coin, "uluna".to_string()),
+            MSG_REPLY_NATIVE_SWAP_TO_TERRA_SWAP,
+        ),
+        Path::TerraSwapToNativeSwap => (
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: contracts.pair.to_string(),
+                funds,
+                msg: to_binary(&PairExecuteMsg::Swap {
+                    offer_asset: Asset {
+                        amount: coin.amount,
+                        info: asset_info,
+                    },
+                    belief_price: None,
+                    max_spread: None,
+                    to: None,
+                })?,
+            }),
+            MSG_REPLY_TERRA_SWAP_TO_NATIVE_SWAP,
+        ),
+    };
+
+    Ok(Response::new().add_submessage(SubMsg {
+        id: sub_msg_id,
+        gas_limit: None,
+        msg,
+        reply_on: ReplyOn::Success,
+    }))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -197,7 +195,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
 }
 
 pub fn query_config(deps: Deps) -> ConfigResponse {
-    let terraswap_router = get_router(deps).unwrap();
+    let contracts = get_contracts(deps).unwrap();
 
     let config: PlanetConfigResponse = query_planet_config(deps);
 
@@ -207,17 +205,79 @@ pub fn query_config(deps: Deps) -> ConfigResponse {
         asset_info: config.asset_info,
         token_code_id: config.token_code_id,
         token_address: config.token_address,
-        terraswap_router: terraswap_router.to_string(),
+        pair_contract: contracts.pair.to_string(),
     }
 }
 
 /// This just stores the result for future query
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, PlanetContractError> {
-    planet_reply(deps, env, msg)
+pub fn reply(
+    deps: DepsMut,
+    env: Env,
+    msg: Reply,
+) -> Result<Response<TerraMsgWrapper>, PlanetContractError> {
+    match msg.id {
+        MSG_REPLY_NATIVE_SWAP_TO_TERRA_SWAP => {
+            let contracts = get_contracts(deps.as_ref()).unwrap();
+            let amount = deps
+                .querier
+                .query_balance(env.contract.address, "uluna")
+                .unwrap()
+                .amount;
+
+            Ok(Response::new().add_submessage(SubMsg {
+                id: planet::contract::MSG_REPLY_ID_EXECUTE,
+                gas_limit: None,
+                msg: CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contracts.pair.to_string(),
+                    funds: vec![Coin {
+                        amount,
+                        denom: "uluna".to_string(),
+                    }],
+                    msg: to_binary(&PairExecuteMsg::Swap {
+                        offer_asset: Asset {
+                            amount,
+                            info: AssetInfo::NativeToken {
+                                denom: "uluna".to_string(),
+                            },
+                        },
+                        belief_price: None,
+                        max_spread: None,
+                        to: None,
+                    })?,
+                }),
+                reply_on: ReplyOn::Success,
+            }))
+        }
+        MSG_REPLY_TERRA_SWAP_TO_NATIVE_SWAP => {
+            let amount = deps
+                .querier
+                .query_balance(env.contract.address, "uluna")
+                .unwrap()
+                .amount;
+
+            Ok(Response::new().add_submessage(SubMsg {
+                id: planet::contract::MSG_REPLY_ID_EXECUTE,
+                gas_limit: None,
+                msg: create_swap_msg(
+                    Coin {
+                        amount,
+                        denom: "uluna".to_string(),
+                    },
+                    "uusd".to_string(),
+                ),
+                reply_on: ReplyOn::Success,
+            }))
+        }
+        _ => planet_reply(deps, env, msg),
+    }
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(deps: DepsMut, env: Env, msg: PlanetMigrateMsg) -> StdResult<Response> {
-    planet_migrate(deps, env, msg)
+pub fn migrate(mut deps: DepsMut, env: Env, msg: MigrateMsg) -> StdResult<Response> {
+    let contracts = Contracts {
+        pair: deps.api.addr_validate(&msg.pair_contract).unwrap(),
+    };
+    set_contracts(deps.branch(), contracts).unwrap();
+    planet_migrate(deps, env, PlanetMigrateMsg {})
 }
