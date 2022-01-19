@@ -1,7 +1,7 @@
 use cosmwasm_std::{to_binary, Addr, QuerierWrapper, QueryRequest, StdResult, WasmQuery};
 
+use crate::planet::{ConfigResponse, QueryMsg};
 use cw20::{Cw20QueryMsg, TokenInfoResponse};
-use starflet_protocol::planet::{ConfigResponse, QueryMsg};
 
 pub fn query_planet_config(
     querier: &QuerierWrapper,

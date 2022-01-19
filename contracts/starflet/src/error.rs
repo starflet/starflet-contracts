@@ -16,9 +16,6 @@ pub enum ContractError {
     #[error("Fail to bond")]
     FailBond {},
 
-    #[error("Fail to unbond")]
-    FailUnbond {},
-
     #[error("Amount does not match after bond and unbond. (expect {0}, result {1})")]
     FailBondAndUnbond(Uint128, Uint128),
 }

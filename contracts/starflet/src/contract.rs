@@ -4,7 +4,6 @@ use cosmwasm_std::{
     coin, to_binary, Addr, Attribute, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Reply,
     Response, StdResult, SubMsg, Uint128, WasmMsg,
 };
-use protobuf::Message;
 use terraswap::querier::query_token_balance;
 
 use crate::error::ContractError;
@@ -12,12 +11,10 @@ use crate::state::{
     get_tmp_add_planet, load_planet, load_planets, remove_planet, remove_tmp_add_planet,
     set_tmp_add_planet, store_planet, Config, PlanetInfo, CONFIG,
 };
-use planet::{
-    querier::{query_planet_config, query_vaults_info},
-    response::MsgExecuteContractResponse,
-};
+
 use starflet_protocol::{
     planet::{Cw20HookMsg as PlanetCw20HookMsg, ExecuteMsg as PlanetExecuteMsg},
+    querier::{query_planet_config, query_vaults_info},
     starflet::{
         Action, ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, PlanetResponse,
         PlanetsResponse, QueryMsg,
@@ -149,7 +146,7 @@ pub fn try_add_planet(
     if planet.asset_info.is_native_token() {
         coins.push(coin(VALIDATION_AMOUNT, planet.asset_info.to_string()))
     }
-    
+
     Ok(Response::new()
         .add_attribute("action", Action::AddPlanet.to_string())
         .add_attribute("contract_addr", contract)
@@ -175,11 +172,6 @@ pub fn try_add_planet(
 pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractError> {
     match msg.id {
         MSG_REPLY_ID_BOND => {
-            let _res: MsgExecuteContractResponse =
-                Message::parse_from_bytes(msg.result.unwrap().data.unwrap().as_slice())
-                    .map_err(|_| ContractError::FailBond {})
-                    .unwrap();
-
             let tmp_add_planet = get_tmp_add_planet(deps.as_ref()).unwrap();
 
             let balance = query_token_balance(
@@ -188,6 +180,10 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
                 env.contract.address,
             )
             .unwrap();
+
+            if balance <= Uint128::zero() {
+                return Err(ContractError::FailBond {});
+            }
 
             Ok(Response::new().add_submessage(SubMsg::reply_on_success(
                 CosmosMsg::Wasm(WasmMsg::Execute {
@@ -203,11 +199,6 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
             )))
         }
         MSG_REPLY_ID_UNBOND => {
-            let _res: MsgExecuteContractResponse =
-                Message::parse_from_bytes(msg.result.unwrap().data.unwrap().as_slice())
-                    .map_err(|_| ContractError::FailUnbond {})
-                    .unwrap();
-
             let tmp_add_planet = get_tmp_add_planet(deps.as_ref()).unwrap();
 
             let balance = tmp_add_planet
