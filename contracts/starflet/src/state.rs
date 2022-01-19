@@ -1,10 +1,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Deps, DepsMut, Order, StdError, StdResult};
+use cosmwasm_std::{Addr, Deps, DepsMut, Order, StdError, StdResult, Uint128};
 use cw_storage_plus::{Bound, Item, Map};
 
 use starflet_protocol::starflet::PlanetResponse;
+use terraswap::asset::AssetInfo;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
@@ -293,4 +294,39 @@ mod planet {
         let res = load_planets(deps.as_ref(), None, None).unwrap();
         assert_eq!(res.len() as u32, DEFAULT_LIMIT);
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct TmpAddPlanet {
+    pub planet_addr: Addr,
+    pub vaults_addr: Addr,
+    pub asset_info: AssetInfo,
+    pub balance: Uint128,
+}
+
+pub const TMP_ADD_PLANET: Item<TmpAddPlanet> = Item::new("tmp_add_planet");
+pub fn get_tmp_add_planet(deps: Deps) -> StdResult<TmpAddPlanet> {
+    TMP_ADD_PLANET.load(deps.storage)
+}
+
+pub fn set_tmp_add_planet(
+    deps: DepsMut,
+    planet_addr: Addr,
+    vaults_addr: Addr,
+    asset_info: AssetInfo,
+    balance: Uint128,
+) -> StdResult<()> {
+    TMP_ADD_PLANET.save(
+        deps.storage,
+        &TmpAddPlanet {
+            planet_addr,
+            vaults_addr,
+            asset_info,
+            balance,
+        },
+    )
+}
+
+pub fn remove_tmp_add_planet(deps: DepsMut) {
+    TMP_ADD_PLANET.remove(deps.storage)
 }

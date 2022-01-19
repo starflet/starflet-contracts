@@ -615,10 +615,13 @@ dependencies = [
  "cosmwasm-std",
  "cosmwasm-storage",
  "cw-storage-plus",
+ "cw20",
+ "planet",
  "protobuf",
  "schemars",
  "serde",
  "starflet-protocol",
+ "terraswap",
  "thiserror",
 ]
 
