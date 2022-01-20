@@ -23,6 +23,7 @@ use starflet_protocol::{
 use terraswap::asset::Asset;
 
 pub const VALIDATION_AMOUNT: u128 = 1000000;
+pub const DECIMAL_DIFF: u128 = 10;
 
 pub const MSG_REPLY_ID_BOND: u64 = 1;
 pub const MSG_REPLY_ID_UNBOND: u64 = 2;
@@ -217,7 +218,7 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
                 .checked_sub(tax.checked_mul(Uint128::from(2u128)).unwrap())
                 .unwrap();
 
-            if base_amount != balance {
+            if base_amount.checked_sub(balance).unwrap() > Uint128::from(DECIMAL_DIFF) {
                 return Err(ContractError::FailBondAndUnbond(base_amount, balance));
             }
 

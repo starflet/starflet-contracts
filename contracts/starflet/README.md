@@ -11,8 +11,8 @@
 #### testnet
 |title|content|
 |--|--|
-|code id|33342|
-|contract|terra1l90p7fpyqpjp234nas5jzkfnn74f74qyu0gdvk|
+|code id|35401|
+|contract|terra1nd6ryxt75dyrtdyfl4j5vzynlrspmc5ntzkm78|
 
 ## Command
 ### InstantiateMsg
