@@ -1,5 +1,3 @@
-#[cfg(not(feature = "library"))]
-use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     attr, from_binary, to_binary, Addr, Attribute, BankMsg, Binary, CanonicalAddr, CosmosMsg, Deps,
     DepsMut, Env, MessageInfo, Reply, ReplyOn, Response, StdError, StdResult, SubMsg, Uint128,
@@ -34,7 +32,6 @@ pub const MSG_REPLY_ID_EXECUTE: u64 = 2;
 pub const MSG_REPLY_ID_EXECUTE_SKIP: u64 = 3;
 pub const MSG_REPLY_ID_MUST_EXECUTE: u64 = 4;
 
-#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     mut deps: DepsMut,
     env: Env,
@@ -78,7 +75,6 @@ pub fn instantiate(
         )))
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -273,8 +269,6 @@ pub fn try_claim(
         .add_attribute("asset", asset.to_string()))
 }
 
-/// This just stores the result for future query
-#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(
     mut deps: DepsMut,
     env: Env,
@@ -383,7 +377,6 @@ pub fn receive_cw20(
     }
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)),
