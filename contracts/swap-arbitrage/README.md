@@ -3,14 +3,14 @@
 #### mainnet
 |title|content|
 |--|--|
-|code id|1809|
+|code id|2439|
 |swap-arbitrage|terra1ndvfjs47eax9yxkc5tge2awlahswry3tg76zvj|
 |vaults|terra1tgsex5ncsutdpl202mhgmldwtcp2w8nyg6a5gq|
 
 #### testnet
 |title|content|
 |--|--|
-|code id|27629|
+|code id|35831|
 |swap-arbitrage|terra1a3cf7kj0leg9lsk29l2ghh6m6e8n8juy85fp2a|
 |vaults|terra1lx3r6tyjtc6naqhrwxguyfju42z77ujx4jcnfa|
 
@@ -25,8 +25,17 @@
         }
     },
     "symbol": "SWAP",
-    "token_code_id": 148, // cw20
-    "pair_contract": "terra156v8s539wtz0sjpn8y8a8lfg8fhmwa7fy22aff" // terraswap luna <> UST pair
+    "token_code_id": 148,
+    "pairs": [
+      {
+        "name": "terraswap",
+        "pair_addr":"terra156v8s539wtz0sjpn8y8a8lfg8fhmwa7fy22aff"
+      },
+      {
+        "name":"astroport",
+        "pair_addr":"terra12eq2zmdmycvx9n6skwpu9kqxts0787rekjnlwm"
+      }
+    ]
 }
 ```
 
