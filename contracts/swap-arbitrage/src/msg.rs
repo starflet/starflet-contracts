@@ -1,4 +1,5 @@
 use cosmwasm_bignumber::Decimal256;
+use cosmwasm_std::Uint128;
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,7 @@ pub enum ExecuteMsg {
     },
     Swap {
         path: String,
+        amount: Uint128,
     },
     Claim {},
 }
@@ -55,6 +57,4 @@ pub struct ConfigResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct MigrateMsg {
-    pub pairs: Vec<Pair>,
-}
+pub struct MigrateMsg {}
