@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     to_binary, Addr, Attribute, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    Reply, ReplyOn, Response, StdResult, SubMsg, WasmMsg,
+    Reply, ReplyOn, Response, StdResult, SubMsg, Uint128, WasmMsg,
 };
 use cw2::set_contract_version;
 use terra_cosmwasm::{create_swap_msg, TerraMsgWrapper};
@@ -92,7 +92,7 @@ pub fn execute(
             remove_pairs,
         ),
         ExecuteMsg::Bond { asset } => try_bond(deps, info, asset),
-        ExecuteMsg::Swap { path } => try_swap(deps, env, info, path),
+        ExecuteMsg::Swap { path, amount } => try_swap(deps, env, info, path, amount),
         ExecuteMsg::Claim {} => try_claim(deps, info),
     }
 }
@@ -145,9 +145,10 @@ const NATIVESWAP: &str = "nativeswap";
 
 pub fn try_swap(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     _info: MessageInfo,
     path: String,
+    amount: Uint128,
 ) -> Result<Response<TerraMsgWrapper>, PlanetContractError> {
     let dex = path.split("_to_").collect::<Vec<&str>>();
 
@@ -156,15 +157,11 @@ pub fn try_swap(
     let config: Config = get_config(deps.as_ref()).unwrap();
     let asset_info: AssetInfo = config.asset_info;
 
-    let balance = asset_info
-        .query_pool(&deps.querier, deps.api, env.contract.address)
-        .unwrap();
-
     let mut funds: Vec<Coin> = vec![];
 
     let asset = Asset {
         info: asset_info.clone(),
-        amount: balance,
+        amount,
     };
 
     let coin = match dex[0] {
@@ -281,18 +278,6 @@ pub fn reply(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(mut deps: DepsMut, env: Env, msg: MigrateMsg) -> StdResult<Response> {
-    for pair in msg.pairs.iter() {
-        let addr = deps.api.addr_validate(&pair.pair_addr).unwrap();
-        set_pair(deps.branch(), pair.name.to_string(), addr).unwrap();
-    }
-
-    set_pair(
-        deps.branch(),
-        NATIVESWAP.to_string(),
-        Addr::unchecked(NATIVESWAP.to_string()),
-    )
-    .unwrap();
-
+pub fn migrate(deps: DepsMut, env: Env, _msg: MigrateMsg) -> StdResult<Response> {
     planet_migrate(deps, env, PlanetMigrateMsg {})
 }
