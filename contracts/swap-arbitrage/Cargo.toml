@@ -49,7 +49,7 @@ serde = { version = "1.0.127", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0.26" }
 planet = { version = "0.1.0", path = "../../packages/planet", features = ["library"]}
 starflet-protocol = { version = "0.1.0", path = "../../packages/starflet_protocol" }
-terraswap = { version = "2.4.0" }
+terraswap = { version = "2.5.0", path="../../packages/terraswap" }
 cosmwasm-bignumber = "2.2.0"
 strum = "0.23"
 strum_macros = "0.23"
