@@ -48,6 +48,7 @@ pub enum ExecuteMsg {
 pub enum Cw20HookMsg {
     /// Return stable coins to a user
     /// according to exchange rate
+    Bond {},
     Unbond {},
 }
 

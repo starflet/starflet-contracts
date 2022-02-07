@@ -72,7 +72,7 @@ pub fn execute(
             code_id,
             router_addr,
         } => try_update_config(deps, info, owner, commission_rate, code_id, router_addr),
-        ExecuteMsg::Bond { asset } => try_bond(deps, info, asset),
+        ExecuteMsg::Bond { asset } => try_bond(deps, info.sender, asset),
         ExecuteMsg::Swap { path, amount } => try_swap(deps, env, info, path, amount),
         ExecuteMsg::Claim {} => try_claim(deps, info),
     }
