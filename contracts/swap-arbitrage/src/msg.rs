@@ -5,13 +5,21 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use terraswap::asset::{Asset, AssetInfo};
 
+pub const MSG_REPLY_PREPARE_SWAP: u64 = 11;
+pub const MSG_REPLY_SWAP: u64 = 12;
+pub const MSG_REPLY_BOND: u64 = 21;
+pub const MSG_REPLY_UNBOND: u64 = 31;
+pub const MSG_REPLY_CLAIM: u64 = 41;
+pub const MSG_REPLY_MIGRATE: u64 = 51;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
     pub commission_rate: Decimal256,
+    pub deposit_asset_info: AssetInfo,
     pub asset_info: AssetInfo,
     pub symbol: String,
     pub token_code_id: u64,
     pub router_addr: String,
+    pub money_market_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -57,5 +65,7 @@ pub struct ConfigResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct MigrateMsg {
-    pub router_addr: String,
+    pub money_market_addr: String,
+    pub asset_info: AssetInfo,
+    pub deposit_asset_info: AssetInfo,
 }

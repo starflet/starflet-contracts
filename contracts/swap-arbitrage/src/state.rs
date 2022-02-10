@@ -1,7 +1,8 @@
-use cosmwasm_std::{Addr, Deps, DepsMut, Order, StdResult, Uint128};
-use cw_storage_plus::{Bound, Item, Map};
+use cosmwasm_std::{Addr, Deps, DepsMut, StdResult, Uint128};
+use cw_storage_plus::Item;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use terraswap::asset::AssetInfo;
 
 pub const ROUTER: Item<Addr> = Item::new("router");
 
@@ -13,48 +14,30 @@ pub fn set_router(deps: DepsMut, router: Addr) -> StdResult<()> {
     ROUTER.save(deps.storage, &router)
 }
 
-pub const PAIRS: Map<String, Addr> = Map::new("pairs");
+pub const DEPOSIT_ASSET_INFO: Item<AssetInfo> = Item::new("bond_asset");
 
-pub fn get_pair(deps: Deps, name: String) -> StdResult<Addr> {
-    PAIRS.load(deps.storage, name)
+pub fn get_deposit_asset_info(deps: Deps) -> StdResult<AssetInfo> {
+    DEPOSIT_ASSET_INFO.load(deps.storage)
 }
 
-pub fn set_pair(deps: DepsMut, name: String, pair: Addr) -> StdResult<()> {
-    PAIRS.save(deps.storage, name, &pair)
-}
-
-pub fn remove_pair(deps: DepsMut, name: String) {
-    PAIRS.remove(deps.storage, name)
+pub fn set_deposit_asset_info(deps: DepsMut, asset_info: AssetInfo) -> StdResult<()> {
+    DEPOSIT_ASSET_INFO.save(deps.storage, &asset_info)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct PairInfo {
-    pub name: String,
-    pub pair_addr: Addr,
+pub struct AnchorInfo {
+    pub market_money: Addr,
+    pub aust: AssetInfo,
 }
 
-const MAX_LIMIT: u32 = 30;
-const DEFAULT_LIMIT: u32 = 10;
-pub fn load_pairs(
-    deps: Deps,
-    start_after: Option<String>,
-    limit: Option<u32>,
-) -> StdResult<Vec<PairInfo>> {
-    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+pub const ANCHOR_INFO: Item<AnchorInfo> = Item::new("anchor_info");
 
-    let start = start_after.map(|s| Bound::exclusive(s.as_bytes().to_vec()));
+pub fn get_anchor_info(deps: Deps) -> StdResult<AnchorInfo> {
+    ANCHOR_INFO.load(deps.storage)
+}
 
-    PAIRS
-        .range(deps.storage, start, None, Order::Ascending)
-        .take(limit)
-        .map(|item| {
-            let (k, v) = item?;
-            Ok(PairInfo {
-                name: String::from_utf8(k).unwrap(),
-                pair_addr: v,
-            })
-        })
-        .collect::<StdResult<Vec<PairInfo>>>()
+pub fn set_anchor_info(deps: DepsMut, market_money: Addr, aust: AssetInfo) -> StdResult<()> {
+    ANCHOR_INFO.save(deps.storage, &AnchorInfo { market_money, aust })
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -80,4 +63,26 @@ pub fn set_tmp_swap(deps: DepsMut, route_path: String, minimum_receive: Uint128)
 
 pub fn remove_tmp_swap(deps: DepsMut) {
     TMP_SWAP.remove(deps.storage)
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct TmpBonder {
+    pub bonder: Addr,
+    pub prev_amount: Uint128,
+}
+
+pub const TMP_BONDER: Item<TmpBonder> = Item::new("tmp_bonder");
+
+pub fn get_tmp_bonder(deps: Deps) -> StdResult<TmpBonder> {
+    TMP_BONDER.load(deps.storage)
+}
+
+pub fn set_tmp_bonder(deps: DepsMut, bonder: Addr, prev_amount: Uint128) -> StdResult<()> {
+    TMP_BONDER.save(
+        deps.storage,
+        &TmpBonder {
+            bonder,
+            prev_amount,
+        },
+    )
 }

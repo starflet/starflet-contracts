@@ -8,7 +8,7 @@ use starflet_protocol::planet::{
     Action, CommissionResponse, ConfigResponse, Cw20HookMsg, ExecuteMsg, InstantiateMsg,
     MigrateMsg, QueryMsg, RateResponse, StakerInfoResponse,
 };
-use std::ops::{Div, Mul, Sub};
+use std::ops::{Div, Mul};
 use terra_cosmwasm::TerraMsgWrapper;
 use terraswap::asset::{Asset, AssetInfo};
 use terraswap::querier::query_token_balance;
@@ -150,7 +150,7 @@ pub fn compute_share_rate(deps: Deps, vaults_contract: Addr) -> StdResult<Decima
 
     let dec_commission = get_commission(deps).unwrap();
 
-    let revenue = balance.sub(dec_commission);
+    let revenue = balance - dec_commission;
 
     Ok(revenue.div(Decimal256::from_uint256(vaults_total_supply)))
 }
@@ -195,17 +195,29 @@ pub fn try_unbond(
 
     let unbond_asset = Asset {
         amount: unbond_amount.into(),
-        info: asset_info,
+        info: asset_info.clone(),
     };
 
     sub_vaults(deps.branch(), Decimal256::from_uint256(unbond_amount)).unwrap();
 
+    let send_msg = match asset_info {
+        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: sender.to_string(),
+                amount,
+            })?,
+            funds: vec![],
+        }),
+        AssetInfo::NativeToken { .. } => CosmosMsg::Bank(BankMsg::Send {
+            to_address: sender.to_string(),
+            amount: vec![unbond_asset.deduct_tax(&deps.querier)?],
+        }),
+    };
+
     Ok(Response::new()
         .add_messages(vec![
-            CosmosMsg::Bank(BankMsg::Send {
-                to_address: sender.to_string(),
-                amount: vec![unbond_asset.deduct_tax(&deps.querier)?],
-            }),
+            send_msg,
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: vaults_contract.to_string(),
                 funds: vec![],
@@ -250,15 +262,13 @@ pub fn try_claim(
         return Err(ContractError::Unauthorized {});
     }
 
-    let dec_amount = get_commission(deps.as_ref()).unwrap();
+    let dec_amount = sub_all_commission(deps.branch()).unwrap();
     let amount = Uint256::one() * dec_amount;
 
     let asset = Asset {
         amount: amount.into(),
         info: config.asset_info,
     };
-
-    sub_all_commission(deps.branch()).unwrap();
 
     Ok(Response::new()
         .add_message(CosmosMsg::Bank(BankMsg::Send {
@@ -303,22 +313,12 @@ pub fn reply(
 
             let config = get_config(deps.as_ref()).unwrap();
 
-            let ubalance = match config.asset_info {
-                AssetInfo::NativeToken { denom } => {
-                    deps.querier
-                        .query_balance(env.contract.address, denom)
-                        .unwrap()
-                        .amount
-                }
-                AssetInfo::Token { contract_addr } => query_token_balance(
-                    &deps.querier,
-                    env.contract.address,
-                    deps.api.addr_validate(contract_addr.as_str())?,
-                )
-                .unwrap(),
-            };
+            let ubalance = config
+                .asset_info
+                .query_pool(&deps.querier, deps.api, env.contract.address)
+                .unwrap();
 
-            let balance = Decimal256::from_uint256(ubalance);
+            let balance = Decimal256::from_uint256(Uint256::from(ubalance));
 
             if balance > post_vaults {
                 let revenue = balance - post_vaults;
@@ -390,7 +390,7 @@ pub fn receive_cw20(
                 cw20_msg.amount,
             )
         }
-        _ => Err(ContractError::MissingUnbondHook {}),
+        _ => Err(ContractError::InvalidHookMsg {}),
     }
 }
 
@@ -418,7 +418,7 @@ pub fn query_config(deps: Deps) -> ConfigResponse {
     }
 }
 
-fn query_stake_info(deps: Deps, staker_addr: String) -> StakerInfoResponse {
+pub fn query_stake_info(deps: Deps, staker_addr: String) -> StakerInfoResponse {
     let config = get_config(deps).unwrap();
 
     let staker = Addr::unchecked(staker_addr);

@@ -19,23 +19,20 @@
 ```
 {
     "commission_rate": "0.1",
-    "asset_info": {
+    "deposit_asset_info": {
         "native_token": {
             "denom": "uusd"
         }
     },
+    "asset_info": {
+        "token": {
+            "contract_addr": "terra1ajt556dpzvjwl0kl5tzku3fc3p3knkg9mkv8jl"
+        }
+    },
     "symbol": "SWAP",
     "token_code_id": 148,
-    "pairs": [
-      {
-        "name": "terraswap",
-        "pair_addr":"terra156v8s539wtz0sjpn8y8a8lfg8fhmwa7fy22aff"
-      },
-      {
-        "name":"astroport",
-        "pair_addr":"terra12eq2zmdmycvx9n6skwpu9kqxts0787rekjnlwm"
-      }
-    ]
+    "router_addr": "terra1c58wrdkyc0ynvvxcv834kz65nfsxmw2w0pwusq",
+    "market_money_addr": "terra15dwd5mj8v59wpj0wvt233mf5efdff808c5tkal"
 }
 ```
 

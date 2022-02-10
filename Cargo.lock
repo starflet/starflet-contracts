@@ -684,6 +684,7 @@ dependencies = [
  "cw-storage-plus",
  "cw2",
  "cw20",
+ "moneymarket",
  "planet",
  "schemars",
  "serde",
