@@ -11,7 +11,7 @@ pub struct InstantiateMsg {
     pub asset_info: AssetInfo,
     pub symbol: String,
     pub token_code_id: u64,
-    pub pairs: Vec<Pair>,
+    pub router_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -22,8 +22,7 @@ pub enum ExecuteMsg {
         owner: Option<String>,
         commission_rate: Option<Decimal256>,
         code_id: Option<u64>,
-        add_pairs: Option<Vec<Pair>>,
-        remove_pairs: Option<Vec<String>>,
+        router_addr: Option<String>,
     },
     Bond {
         asset: Asset,
@@ -57,4 +56,6 @@ pub struct ConfigResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct MigrateMsg {}
+pub struct MigrateMsg {
+    pub router_addr: String,
+}

@@ -43,7 +43,7 @@ starflet-protocol = { version = "0.1.0", path = "../../packages/starflet_protoco
 planet = { version = "0.1.0", path = "../../packages/planet", features = ["library"]}
 protobuf = { version = "2", features = ["with-bytes"] }
 cw20 = { version = "0.8.0" } 
-terraswap = { version = "2.4.0" }
+terraswap = { version = "2.5.0", path="../../packages/terraswap" }
 
 [dev-dependencies]
 cosmwasm-schema = { version = "0.16.0" }
