@@ -234,8 +234,8 @@ pub fn try_swap(
 
     let aust = Uint256::from(amount) / epoch_state.exchange_rate;
 
-    Ok(Response::new().add_submessage(SubMsg::reply_on_success(
-        CosmosMsg::Wasm(WasmMsg::Execute {
+    Ok(Response::new().add_submessage(SubMsg {
+        msg: CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: anchor_info.aust.to_string(),
             funds: vec![],
             msg: to_binary(&Cw20ExecuteMsg::Send {
@@ -245,8 +245,10 @@ pub fn try_swap(
             })
             .unwrap(),
         }),
-        MSG_REPLY_PREPARE_SWAP,
-    )))
+        id: MSG_REPLY_PREPARE_SWAP,
+        gas_limit: None,
+        reply_on: ReplyOn::Always,
+    }))
 }
 
 fn generate_route_msg(
@@ -258,8 +260,7 @@ fn generate_route_msg(
 
     let router_contract = get_router(deps.as_ref()).unwrap();
 
-    let config: Config = get_config(deps.as_ref()).unwrap();
-    let asset_info: AssetInfo = config.asset_info;
+    let asset_info: AssetInfo = get_deposit_asset_info(deps.as_ref()).unwrap();
 
     let mut funds: Vec<Coin> = vec![];
 
@@ -381,12 +382,19 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
 pub fn query_config(deps: Deps) -> ConfigResponse {
     let config: PlanetConfigResponse = query_planet_config(deps);
 
+    let router = get_router(deps).unwrap();
+    let anchor_info = get_anchor_info(deps).unwrap();
+    let deposit_asset_info = get_deposit_asset_info(deps).unwrap();
+
     ConfigResponse {
         owner: config.owner,
         commission_rate: config.commission_rate,
         asset_info: config.asset_info,
         token_code_id: config.token_code_id,
         token_address: config.token_address,
+        router_addr: router.to_string(),
+        deposit_asset_info,
+        money_market_addr: anchor_info.market_money.to_string(),
     }
 }
 
@@ -438,13 +446,30 @@ pub fn reply(
     match reply.id {
         MSG_REPLY_PREPARE_SWAP => {
             let tmp_swap = get_tmp_swap(deps.as_ref()).unwrap();
-            let msg = generate_route_msg(deps, tmp_swap.route_path, tmp_swap.minimum_receive);
-            return Ok(Response::new().add_submessage(SubMsg {
+
+            let deposit_asset_info = get_deposit_asset_info(deps.as_ref()).unwrap();
+            let amount = deposit_asset_info
+                .query_pool(&deps.querier, deps.api, env.contract.address)
+                .unwrap();
+
+            // discarding
+            if amount + Uint128::from(10u64) < tmp_swap.minimum_receive {
+                return Err(PlanetContractError::Std(StdError::generic_err(format!(
+                    "swap amount is diffrent {} / {}",
+                    amount, tmp_swap.minimum_receive
+                ))));
+            }
+
+            set_tmp_swap(deps.branch(), tmp_swap.route_path.clone(), amount).unwrap();
+
+            let msg = generate_route_msg(deps, tmp_swap.route_path, amount);
+
+            Ok(Response::new().add_submessage(SubMsg {
                 msg,
                 id: MSG_REPLY_SWAP,
                 gas_limit: None,
                 reply_on: ReplyOn::Always,
-            }));
+            }))
         }
         MSG_REPLY_SWAP => {
             let tmp_swap = get_tmp_swap(deps.as_ref()).unwrap();
@@ -459,16 +484,22 @@ pub fn reply(
                         .query_balance(env.contract.address, deposit_asset_info.to_string())
                         .unwrap();
 
+                    let asset = Asset {
+                        info: deposit_asset_info,
+                        amount: coin.amount,
+                    };
+                    let coin = asset.deduct_tax(&deps.querier).unwrap();
+
                     let anchor_info = get_anchor_info(deps.as_ref()).unwrap();
 
-                    return Ok(Response::new().add_submessage(SubMsg::reply_on_success(
+                    Ok(Response::new().add_submessage(SubMsg::reply_on_success(
                         CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: anchor_info.market_money.to_string(),
                             funds: vec![coin],
                             msg: to_binary(&MoneyMarketExecuteMsg::DepositStable {}).unwrap(),
                         }),
                         planet::contract::MSG_REPLY_ID_EXECUTE,
-                    )));
+                    )))
                 }
                 ContractResult::Err(_err) => {
                     let minimum_receive = tmp_swap
@@ -485,14 +516,14 @@ pub fn reply(
                     set_tmp_swap(deps.branch(), tmp_swap.route_path.clone(), minimum_receive)
                         .unwrap();
                     let msg = generate_route_msg(deps, tmp_swap.route_path, minimum_receive);
-                    return Ok(Response::new().add_submessage(SubMsg {
+                    Ok(Response::new().add_submessage(SubMsg {
                         msg,
                         id: MSG_REPLY_SWAP,
                         gas_limit: None,
                         reply_on: ReplyOn::Always,
-                    }));
+                    }))
                 }
-            };
+            }
         }
         MSG_REPLY_BOND => {
             let tmp_bonder = get_tmp_bonder(deps.as_ref()).unwrap();
@@ -504,14 +535,14 @@ pub fn reply(
                 .query_pool(&deps.querier, deps.api, env.contract.address)
                 .unwrap();
 
-            return planet_bond(
+            planet_bond(
                 deps,
                 tmp_bonder.bonder,
                 Asset {
                     info: anchor_info.aust,
                     amount: current_balance - tmp_bonder.prev_amount,
                 },
-            );
+            )
         }
         MSG_REPLY_MIGRATE => {
             let anchor_info = get_anchor_info(deps.as_ref()).unwrap();
@@ -524,7 +555,7 @@ pub fn reply(
                 Decimal256::from_uint256(Uint256::from(balance)),
             )
             .unwrap();
-            return Ok(Response::new().add_attribute("migrate", "success"));
+            Ok(Response::new().add_attribute("migrate", "success"))
         }
         MSG_REPLY_UNBOND => {
             let tmp_bonder = get_tmp_bonder(deps.as_ref()).unwrap();
@@ -543,10 +574,10 @@ pub fn reply(
                 info: deposit_asset_info,
             };
 
-            return Ok(Response::new().add_message(CosmosMsg::Bank(BankMsg::Send {
+            Ok(Response::new().add_message(CosmosMsg::Bank(BankMsg::Send {
                 to_address: tmp_bonder.bonder.to_string(),
                 amount: vec![asset.deduct_tax(&deps.querier)?],
-            })));
+            })))
         }
         MSG_REPLY_CLAIM => {
             let config = get_config(deps.as_ref()).unwrap();
@@ -564,15 +595,13 @@ pub fn reply(
                 amount: balance,
             };
 
-            return Ok(Response::new().add_message(CosmosMsg::Bank(BankMsg::Send {
+            Ok(Response::new().add_message(CosmosMsg::Bank(BankMsg::Send {
                 to_address: config.owner.to_string(),
                 amount: vec![asset.deduct_tax(&deps.querier)?],
-            })));
+            })))
         }
-        _ => {}
-    };
-
-    planet_reply(deps, env, reply)
+        _ => planet_reply(deps, env, reply),
+    }
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

@@ -60,6 +60,9 @@ pub struct ConfigResponse {
     pub asset_info: AssetInfo,
     pub token_code_id: u64,
     pub token_address: String,
+    pub deposit_asset_info: AssetInfo,
+    pub router_addr: String,
+    pub money_market_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
