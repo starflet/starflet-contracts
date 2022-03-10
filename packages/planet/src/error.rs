@@ -12,8 +12,8 @@ pub enum ContractError {
     #[error("Invalid reply ID")]
     InvalidReplyId {},
 
-    #[error("Invalid request: \"unbond\" message not included in request")]
-    MissingUnbondHook {},
+    #[error("Invalid request: \"bond\", \"unbond\" message not included in request")]
+    InvalidHookMsg {},
 
     #[error("Already instantiate contract {0}")]
     AlreadyInstantiate(String),

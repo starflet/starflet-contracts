@@ -8,7 +8,7 @@ use starflet_protocol::planet::{
     Action, CommissionResponse, ConfigResponse, Cw20HookMsg, ExecuteMsg, InstantiateMsg,
     MigrateMsg, QueryMsg, RateResponse, StakerInfoResponse,
 };
-use std::ops::{Div, Mul, Sub};
+use std::ops::{Div, Mul};
 use terra_cosmwasm::TerraMsgWrapper;
 use terraswap::asset::{Asset, AssetInfo};
 use terraswap::querier::query_token_balance;
@@ -88,7 +88,10 @@ pub fn execute(
             commission_rate,
             code_id,
         } => try_update_config(deps, info, owner, commission_rate, code_id),
-        ExecuteMsg::Bond { asset } => try_bond(deps, info, asset),
+        ExecuteMsg::Bond { asset } => {
+            asset.assert_sent_native_token_balance(&info).unwrap();
+            try_bond(deps, info.sender, asset)
+        }
         ExecuteMsg::Execute { msg, is_distribute } => {
             try_execute(deps.as_ref(), info, msg, is_distribute)
         }
@@ -147,18 +150,16 @@ pub fn compute_share_rate(deps: Deps, vaults_contract: Addr) -> StdResult<Decima
 
     let dec_commission = get_commission(deps).unwrap();
 
-    let revenue = balance.sub(dec_commission);
+    let revenue = balance - dec_commission;
 
     Ok(revenue.div(Decimal256::from_uint256(vaults_total_supply)))
 }
 
 pub fn try_bond(
     deps: DepsMut,
-    info: MessageInfo,
+    sender: Addr,
     asset: Asset,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
-    asset.assert_sent_native_token_balance(&info).unwrap();
-
     let config = get_config(deps.as_ref()).unwrap();
 
     let token_contract = config.token_address.unwrap();
@@ -172,12 +173,12 @@ pub fn try_bond(
             contract_addr: token_contract.to_string(),
             funds: vec![],
             msg: to_binary(&Cw20ExecuteMsg::Mint {
-                recipient: info.sender.to_string(),
+                recipient: sender.to_string(),
                 amount: mint_amount.into(),
             })?,
         }))
         .add_attribute("action", Action::Bond.to_string())
-        .add_attribute("bonder", info.sender)
+        .add_attribute("bonder", sender)
         .add_attribute("asset", asset.to_string())
         .add_attribute("mint_amount", mint_amount))
 }
@@ -194,17 +195,29 @@ pub fn try_unbond(
 
     let unbond_asset = Asset {
         amount: unbond_amount.into(),
-        info: asset_info,
+        info: asset_info.clone(),
     };
 
     sub_vaults(deps.branch(), Decimal256::from_uint256(unbond_amount)).unwrap();
 
+    let send_msg = match asset_info {
+        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: sender.to_string(),
+                amount,
+            })?,
+            funds: vec![],
+        }),
+        AssetInfo::NativeToken { .. } => CosmosMsg::Bank(BankMsg::Send {
+            to_address: sender.to_string(),
+            amount: vec![unbond_asset.deduct_tax(&deps.querier)?],
+        }),
+    };
+
     Ok(Response::new()
         .add_messages(vec![
-            CosmosMsg::Bank(BankMsg::Send {
-                to_address: sender.to_string(),
-                amount: vec![unbond_asset.deduct_tax(&deps.querier)?],
-            }),
+            send_msg,
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: vaults_contract.to_string(),
                 funds: vec![],
@@ -249,15 +262,13 @@ pub fn try_claim(
         return Err(ContractError::Unauthorized {});
     }
 
-    let dec_amount = get_commission(deps.as_ref()).unwrap();
+    let dec_amount = sub_all_commission(deps.branch()).unwrap();
     let amount = Uint256::one() * dec_amount;
 
     let asset = Asset {
         amount: amount.into(),
         info: config.asset_info,
     };
-
-    sub_all_commission(deps.branch()).unwrap();
 
     Ok(Response::new()
         .add_message(CosmosMsg::Bank(BankMsg::Send {
@@ -302,22 +313,12 @@ pub fn reply(
 
             let config = get_config(deps.as_ref()).unwrap();
 
-            let ubalance = match config.asset_info {
-                AssetInfo::NativeToken { denom } => {
-                    deps.querier
-                        .query_balance(env.contract.address, denom)
-                        .unwrap()
-                        .amount
-                }
-                AssetInfo::Token { contract_addr } => query_token_balance(
-                    &deps.querier,
-                    env.contract.address,
-                    deps.api.addr_validate(contract_addr.as_str())?,
-                )
-                .unwrap(),
-            };
+            let ubalance = config
+                .asset_info
+                .query_pool(&deps.querier, deps.api, env.contract.address)
+                .unwrap();
 
-            let balance = Decimal256::from_uint256(ubalance);
+            let balance = Decimal256::from_uint256(Uint256::from(ubalance));
 
             if balance > post_vaults {
                 let revenue = balance - post_vaults;
@@ -357,6 +358,22 @@ pub fn receive_cw20(
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let contract_addr = info.sender;
     match from_binary(&cw20_msg.msg) {
+        Ok(Cw20HookMsg::Bond {}) => {
+            let config: Config = get_config(deps.as_ref()).unwrap();
+            if contract_addr != config.asset_info.to_string() {
+                return Err(ContractError::Unauthorized {});
+            }
+
+            let cw20_sender_addr = deps.api.addr_validate(&cw20_msg.sender)?;
+            try_bond(
+                deps,
+                cw20_sender_addr,
+                Asset {
+                    info: config.asset_info,
+                    amount: cw20_msg.amount,
+                },
+            )
+        }
         Ok(Cw20HookMsg::Unbond {}) => {
             // only asset contract can execute this message
             let config: Config = get_config(deps.as_ref()).unwrap();
@@ -373,7 +390,7 @@ pub fn receive_cw20(
                 cw20_msg.amount,
             )
         }
-        _ => Err(ContractError::MissingUnbondHook {}),
+        _ => Err(ContractError::InvalidHookMsg {}),
     }
 }
 
@@ -401,7 +418,7 @@ pub fn query_config(deps: Deps) -> ConfigResponse {
     }
 }
 
-fn query_stake_info(deps: Deps, staker_addr: String) -> StakerInfoResponse {
+pub fn query_stake_info(deps: Deps, staker_addr: String) -> StakerInfoResponse {
     let config = get_config(deps).unwrap();
 
     let staker = Addr::unchecked(staker_addr);
@@ -896,7 +913,7 @@ mod bond {
     use cosmwasm_std::testing::{mock_env, mock_info, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{attr, coins, ContractResult, SubMsgExecutionResponse};
     use starflet_protocol::mock_querier::mock_dependencies;
-    use terraswap::asset::AssetInfo::NativeToken;
+    use terraswap::asset::AssetInfo::{NativeToken, Token};
 
     use crate::response::MsgInstantiateContractResponse;
 
@@ -910,9 +927,40 @@ mod bond {
     static BONDER1: &str = "bonder0000";
     static BONDER1_AMOUNT: u128 = 100u128;
 
+    static VAULTS_ASSET_TOKEN: &str = "vaultsassettoken";
+
     fn init(mut deps: DepsMut) {
         let asset_info = NativeToken {
             denom: "uusd".to_string(),
+        };
+        let msg = InstantiateMsg {
+            commission_rate: Decimal256::from_str(COMMISSION_RATE).unwrap(),
+            asset_info,
+            token_code_id: CODE_ID,
+            symbol: SYMBOL.to_string(),
+        };
+
+        let info = mock_info(OWNER, &[]);
+
+        instantiate(deps.branch(), mock_env(), info, msg).unwrap();
+
+        let mut res = MsgInstantiateContractResponse::new();
+        res.set_contract_address(MOCK_CONTRACT_ADDR.to_string());
+
+        let reply_msg = Reply {
+            id: MSG_REPLY_ID_TOKEN_INSTANT,
+            result: ContractResult::Ok(SubMsgExecutionResponse {
+                events: vec![],
+                data: Some(res.write_to_bytes().unwrap().into()),
+            }),
+        };
+
+        reply(deps.branch(), mock_env(), reply_msg).unwrap();
+    }
+
+    fn init_cw20(mut deps: DepsMut) {
+        let asset_info = Token {
+            contract_addr: VAULTS_ASSET_TOKEN.to_string(),
         };
         let msg = InstantiateMsg {
             commission_rate: Decimal256::from_str(COMMISSION_RATE).unwrap(),
@@ -989,6 +1037,45 @@ mod bond {
 
         assert_eq!(
             Decimal256::from_uint256(Uint256::from(100u128)),
+            get_vaults(deps.as_ref()).unwrap()
+        );
+    }
+
+    #[test]
+    fn normal_bond_with_received() {
+        let mut deps = mock_dependencies(&[]);
+        deps.querier.with_token_balances(&[(
+            &MOCK_CONTRACT_ADDR.to_string(),
+            &[(&BONDER1.to_string(), &Uint128::from(0u128))],
+        )]);
+
+        init_cw20(deps.as_mut());
+
+        let bond_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: BONDER1.to_string(),
+            amount: Uint128::from(BONDER1_AMOUNT),
+            msg: to_binary(&Cw20HookMsg::Bond {}).unwrap(),
+        });
+
+        let info = mock_info(VAULTS_ASSET_TOKEN, &[]);
+
+        let res = execute(deps.as_mut(), mock_env(), info, bond_msg).unwrap();
+
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "bond"),
+                attr("bonder", BONDER1.to_string()),
+                attr(
+                    "asset",
+                    BONDER1_AMOUNT.to_string() + &VAULTS_ASSET_TOKEN.to_string()
+                ),
+                attr("mint_amount", BONDER1_AMOUNT.to_string()),
+            ]
+        );
+
+        assert_eq!(
+            Decimal256::from_uint256(Uint256::from(BONDER1_AMOUNT)),
             get_vaults(deps.as_ref()).unwrap()
         );
     }
@@ -1316,7 +1403,6 @@ mod rate {
     }
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
     Ok(Response::default())
 }
