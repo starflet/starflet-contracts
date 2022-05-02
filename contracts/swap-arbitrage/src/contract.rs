@@ -16,28 +16,24 @@ use crate::{
     querier::query_epoch_state,
     state::{
         get_anchor_info, get_deposit_asset_info, get_router, get_tmp_bonder, get_tmp_swap,
-        remove_tmp_swap, set_anchor_info, set_deposit_asset_info, set_router, set_tmp_bonder,
-        set_tmp_swap,
+        remove_tmp_swap, set_deposit_asset_info, set_router, set_tmp_bonder, set_tmp_swap,
     },
 };
 use starflet_protocol::planet::{
     CommissionResponse, ConfigResponse as PlanetConfigResponse, Cw20HookMsg,
-    InstantiateMsg as PlanetInstantiateMsg, MigrateMsg as PlanetMigrateMsg, QueryMsg,
-    StakerInfoResponse,
+    InstantiateMsg as PlanetInstantiateMsg, QueryMsg, StakerInfoResponse,
 };
 
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use planet::{
     contract::{
-        compute_share_rate, instantiate as planet_instantiate, migrate as planet_migrate,
-        query as planet_query, query_config as query_planet_config,
-        query_stake_info as planet_query_stake_info, reply as planet_reply,
-        try_bond as planet_bond, try_update_config as try_planet_update_config,
+        compute_share_rate, instantiate as planet_instantiate, query as planet_query,
+        query_config as query_planet_config, query_stake_info as planet_query_stake_info,
+        reply as planet_reply, try_bond as planet_bond,
+        try_update_config as try_planet_update_config,
     },
     error::ContractError as PlanetContractError,
-    state::{
-        get_commission, get_config, set_config, set_vaults, sub_all_commission, sub_vaults, Config,
-    },
+    state::{get_commission, get_config, set_vaults, sub_all_commission, sub_vaults, Config},
 };
 use terraswap::{
     asset::{Asset, AssetInfo},
@@ -136,19 +132,27 @@ pub fn receive_cw20(
             )
             .unwrap();
 
-            Ok(Response::new().add_submessage(SubMsg::reply_on_success(
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: anchor_info.aust.to_string(),
+            Ok(Response::new()
+                .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_addr.to_string(),
                     funds: vec![],
-                    msg: to_binary(&Cw20ExecuteMsg::Send {
-                        amount: unbond_amount.into(),
-                        contract: anchor_info.market_money.to_string(),
-                        msg: to_binary(&MoneyMarketCw20HookMsg::RedeemStable {}).unwrap(),
-                    })
-                    .unwrap(),
-                }),
-                MSG_REPLY_UNBOND,
-            )))
+                    msg: to_binary(&Cw20ExecuteMsg::Burn {
+                        amount: cw20_msg.amount,
+                    })?,
+                }))
+                .add_submessage(SubMsg::reply_on_success(
+                    CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: anchor_info.aust.to_string(),
+                        funds: vec![],
+                        msg: to_binary(&Cw20ExecuteMsg::Send {
+                            amount: unbond_amount.into(),
+                            contract: anchor_info.market_money.to_string(),
+                            msg: to_binary(&MoneyMarketCw20HookMsg::RedeemStable {}).unwrap(),
+                        })
+                        .unwrap(),
+                    }),
+                    MSG_REPLY_UNBOND,
+                )))
         }
         _ => Err(PlanetContractError::InvalidHookMsg {}),
     }
@@ -605,36 +609,17 @@ pub fn reply(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(mut deps: DepsMut, env: Env, msg: MigrateMsg) -> StdResult<Response> {
-    let commission = get_commission(deps.as_ref()).unwrap();
-    if commission != Decimal256::zero() {
-        return Err(StdError::generic_err("commission must be zero"));
-    }
+pub fn migrate(deps: DepsMut, env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    let config = get_config(deps.as_ref()).unwrap();
+    let vaults_address = config.token_address.unwrap();
+    let amount =
+        query_token_balance(&deps.querier, vaults_address.clone(), env.contract.address).unwrap();
 
-    let mut config = get_config(deps.as_ref()).unwrap();
-    config.asset_info = msg.asset_info.clone();
-    set_config(deps.branch(), config).unwrap();
-
-    let coin = deps
-        .querier
-        .query_balance(
-            env.clone().contract.address,
-            msg.deposit_asset_info.to_string(),
-        )
-        .unwrap();
-
-    let money_market_addr = deps.api.addr_validate(&msg.money_market_addr).unwrap();
-    set_anchor_info(deps.branch(), money_market_addr.clone(), msg.asset_info).unwrap();
-
-    set_deposit_asset_info(deps.branch(), msg.deposit_asset_info).unwrap();
-    let res = planet_migrate(deps, env, PlanetMigrateMsg {}).unwrap();
-
-    Ok(res.add_submessage(SubMsg::reply_on_success(
-        CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: money_market_addr.to_string(),
-            funds: vec![coin],
-            msg: to_binary(&MoneyMarketExecuteMsg::DepositStable {}).unwrap(),
-        }),
-        MSG_REPLY_MIGRATE,
-    )))
+    Ok(
+        Response::new().add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: vaults_address.to_string(),
+            funds: vec![],
+            msg: to_binary(&Cw20ExecuteMsg::Burn { amount })?,
+        })),
+    )
 }

@@ -67,8 +67,4 @@ pub struct ConfigResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct MigrateMsg {
-    pub money_market_addr: String,
-    pub asset_info: AssetInfo,
-    pub deposit_asset_info: AssetInfo,
-}
+pub struct MigrateMsg {}
